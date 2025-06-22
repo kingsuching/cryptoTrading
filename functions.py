@@ -383,19 +383,14 @@ def predict_sequence(model, price, starter, scaler, sequence_length=30, total_le
     current_sequence.append(price)
     current_sequence = current_sequence[-total_length:]  # Keep only the last 'total_length' prices
 
-    # Generate predictions one by one
+    # Generate predictions one by one using the rolling window with existing predictions
     for i in range(sequence_length):
-        # Create input array: current sequence + padding
         input_data = padding(current_sequence, target_length=total_length)
-
-        # Create DataFrame for model input
         input_df = pd.DataFrame({'sequences': [input_data]})
-        next_prediction = model.predict(input_df)[0][0]  # Extract scalar value
+        next_prediction = model.predict(input_df)[0][0]
         next_prediction = scaler.inverse_transform([[next_prediction]])[0][0]
-
-        # Add prediction to sequence
         current_sequence.append(next_prediction)
-        current_sequence = current_sequence[-total_length:]  # Keep only the last 'total_length' predictions
+        current_sequence = current_sequence[-total_length:]
 
     return current_sequence[1:(sequence_length + 1)]
 
@@ -409,10 +404,10 @@ def transformerDataSetup(daily_data, col='close'):
             seqs.append(seq)
             nexts.append(next)
         except Exception as e:
-            print(f'Error at {i} Exception:', e)
+            print(f'Error at {i} | Exception:', e)
 
     seqs = [padding(seq, len(daily_data)) for seq in seqs]
-    daily_data[col] = seqs
+    daily_data['sequence'] = seqs
     daily_data['next'] = nexts
     return daily_data
 
