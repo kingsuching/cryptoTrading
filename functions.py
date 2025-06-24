@@ -115,7 +115,7 @@ def newspapers_from_queries(coin, queries_path):
         stuff = get_newspapers(q, links)
         newspapers = pd.concat([newspapers, stuff], ignore_index=True)
 
-    newspapers.to_csv(PATH)
+    newspapers.to_csv(PATH, index=False)
     return newspapers
 
 def newspaper_sentiment_pipeline(coin, newspaper_path=None, queries_path='queries.txt', NEGATIVE=-1, NEUTRAL=0, POSITIVE=1):
@@ -138,6 +138,9 @@ def newspaper_sentiment_pipeline(coin, newspaper_path=None, queries_path='querie
     
     # Step 4: Merge the newspaper data with the full/market data
     df = pd.read_csv(fullDataPath(coin))
+    # drop the 'Unnamed: 0' columns
+    unnamed = df.columns.str.contains(r'^Unnamed: \d+(\.\d+)?$')
+    df = df.loc[:, ~unnamed]
     df['time'] = pd.to_datetime(df['time'])  # Convert 'time' to datetime
     coin_newspapers['date'] = pd.to_datetime(coin_newspapers['date'])  # Convert 'date' to datetime
     merged_df = pd.merge(df, coin_newspapers, left_on='time', right_on='date', how='left')
@@ -412,14 +415,16 @@ def transformerDataSetup(daily_data, col='close'):
     return daily_data
 
 
-def transformerXTrainYTrain(daily_data, testSize):
+def transformerXTrainYTrain(daily_data, testSize, makeNormal=False):
     train_data = daily_data.iloc[:testSize]
     test_data = daily_data.iloc[testSize:]
     X_train = train_data[['sequence']]
     y_train = train_data['next']
     X_test = test_data[['sequence']]
     y_test = test_data['next']
-    return X_train, X_test, y_train, y_test
+    if makeNormal:
+        return normalize(X_train, X_test, y_train, y_test)
+    return X_train, X_test, y_train, y_test, None, None
 
 
 def normalize(X_train, X_test, y_train, y_test):
@@ -427,7 +432,6 @@ def normalize(X_train, X_test, y_train, y_test):
     sequence_scaler = StandardScaler()
     target_scaler = StandardScaler()
 
-    # Normalize target values
     y_train_scaled = target_scaler.fit_transform(y_train.values.reshape(-1, 1)).flatten()
     y_test_scaled = target_scaler.transform(y_test.values.reshape(-1, 1)).flatten()
 
@@ -440,8 +444,6 @@ def normalize(X_train, X_test, y_train, y_test):
     })
     y_train_norm = pd.Series(y_train_scaled)
     y_test_norm = pd.Series(y_test_scaled)
-    return X_train_norm, X_test_norm, y_train_norm, y_test_norm, sequence_scaler, target_scaler
 
-if __name__ == '__main__':
-    cn = newspaper_sentiment_pipeline(COIN, newspaper_path=None, queries_path='queries.txt')
-    print(cn['score'].describe())
+    # return the training sets and the normalization scalers for predicting
+    return X_train_norm, X_test_norm, y_train_norm, y_test_norm, sequence_scaler, target_scaler

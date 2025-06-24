@@ -3,11 +3,16 @@ import torch.nn as nn
 import math
 import numpy as np
 import pandas as pd
-from CONSTANTS import FILL
+import CONSTANTS
 from matplotlib import pyplot as plt
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 from functions import *
+from sklearn.model_selection import GridSearchCV, KFold
+from sklearn.base import BaseEstimator, RegressorMixin
+from sklearn.metrics import mean_squared_error
+import warnings
+warnings.filterwarnings('ignore')
 
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, max_seq_length=5000):
@@ -39,6 +44,7 @@ class MultiHeadAttention(nn.Module):
         self.W_k = nn.Linear(d_model, d_model)
         self.W_v = nn.Linear(d_model, d_model)
         self.W_o = nn.Linear(d_model, d_model)
+        self.mask_value = CONSTANTS.FILL
 
     def scaled_dot_product_attention(self, Q, K, V, mask=None):
         attn_scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.d_k)
@@ -401,3 +407,237 @@ class BaseTransformer(nn.Module):
             y_true = np.array(y).reshape(-1, 1)
 
         return np.sqrt(np.mean((y_true - predictions) ** 2))
+
+    def tune_hyperparameters(self, X_train, y_train, param_grid, cv=5,
+                             scoring='r2', n_jobs=-1, verbose=True, epochs=50):
+        """
+        Tune BaseTransformer hyperparameters using GridSearchCV [[1]]
+
+        Args:
+            X_train: Training data (pandas DataFrame with sequences)
+            y_train: Training targets (pandas Series)
+            param_grid: Dictionary of hyperparameters to search
+            cv: Number of cross-validation folds
+            scoring: Scoring metric ('r2', 'neg_mean_squared_error', 'neg_root_mean_squared_error')
+            n_jobs: Number of parallel jobs (-1 for all processors)
+            verbose: Whether to print progress
+            epochs: Number of training epochs per model
+
+        Returns:
+            GridSearchCV object with results
+        """
+
+        # Default parameter grid if none provided [[2]]
+        if param_grid is None:
+            param_grid = {
+                'd_model': [128, 256, 512],  # Model dimension [[2]]
+                'num_heads': [4, 8, 12],  # Number of attention heads [[2]]
+                'num_layers': [2, 4, 6],  # Number of transformer layers [[2]]
+                'd_ff': [512, 1024, 2048],  # Feed-forward dimension [[2]]
+                'dropout': [0.1, 0.2, 0.3],  # Dropout rate [[2]]
+                'learning_rate': [1e-4, 5e-4, 1e-3],  # Learning rate [[2]]
+                'batch_size': [16, 32, 64]  # Batch size [[2]]
+            }
+
+        # Create the wrapper estimator
+        estimator = BaseTransformerWrapper(epochs=epochs, verbose=False)
+
+        # Set up cross-validation strategy [[1]]
+        if isinstance(cv, int):
+            cv_strategy = KFold(n_splits=cv, shuffle=True, random_state=42)
+        else:
+            cv_strategy = cv
+
+        # Validate scoring parameter [[3]]
+        scoring_functions = {
+            'r2': 'r2',
+            'neg_mean_squared_error': 'neg_mean_squared_error',
+            'neg_root_mean_squared_error': 'neg_root_mean_squared_error'
+        }
+
+        if scoring not in scoring_functions:
+            raise ValueError(f"Scoring must be one of {list(scoring_functions.keys())}")
+
+        # Initialize GridSearchCV [[1]]
+        grid_search = GridSearchCV(
+            estimator=estimator,
+            param_grid=param_grid,
+            cv=cv_strategy,
+            scoring=scoring_functions[scoring],
+            n_jobs=n_jobs,
+            verbose=2 if verbose else 0,
+            return_train_score=True,
+            error_score='raise'
+        )
+
+        if verbose:
+            print("Starting Grid Search Cross-Validation...")
+            # Calculate total combinations
+            total_combinations = 1
+            for param_values in param_grid.values():
+                total_combinations *= len(param_values)
+            print(f"Parameter combinations to test: {total_combinations}")
+            print(f"Total fits: {total_combinations * cv}")
+
+        # Fit the grid search [[1]]
+        try:
+            grid_search.fit(X_train, y_train)
+        except Exception as e:
+            print(f"Grid search failed with error: {e}")
+            return None
+
+        if verbose:
+            print("\nGrid Search completed!")
+            print(f"Best parameters: {grid_search.best_params_}")
+            print(f"Best cross-validation score: {grid_search.best_score_:.4f}")
+
+        # Store results in the instance for later access
+        self.grid_search_results_ = grid_search
+        self.best_params_ = grid_search.best_params_
+        self.best_score_ = grid_search.best_score_
+
+        return grid_search
+
+    def analyze_tuning_results(self, top_n=5):
+        """
+        Analyze and display grid search results
+
+        Args:
+            top_n: Number of top results to display
+
+        Returns:
+            DataFrame with detailed results
+        """
+        if not hasattr(self, 'grid_search_results_'):
+            raise ValueError("No grid search results found. Run tune_hyperparameters first.")
+
+        grid_search = self.grid_search_results_
+
+        # Convert results to DataFrame [[3]]
+        results_df = pd.DataFrame(grid_search.cv_results_)
+
+        # Select relevant columns
+        columns_of_interest = [
+            'mean_test_score', 'std_test_score', 'rank_test_score',
+            'mean_train_score', 'std_train_score'
+        ]
+
+        # Add parameter columns
+        param_columns = [col for col in results_df.columns if col.startswith('param_')]
+        columns_of_interest.extend(param_columns)
+
+        # Filter and sort results
+        results_summary = results_df[columns_of_interest].copy()
+        results_summary = results_summary.sort_values('rank_test_score')
+
+        print(f"\nTop {top_n} parameter combinations:")
+        print("=" * 80)
+
+        for i in range(min(top_n, len(results_summary))):
+            row = results_summary.iloc[i]
+            print(f"\nRank {int(row['rank_test_score'])}:")
+            print(f"  CV Score: {row['mean_test_score']:.4f} (±{row['std_test_score']:.4f})")
+            print(f"  Train Score: {row['mean_train_score']:.4f} (±{row['std_train_score']:.4f})")
+            print("  Parameters:")
+            for col in param_columns:
+                param_name = col.replace('param_', '')
+                print(f"    {param_name}: {row[col]}")
+
+        return results_summary
+
+    def create_tuned_model(self, **override_params):
+        """
+        Create a new BaseTransformer with optimized hyperparameters
+
+        Args:
+            **override_params: Additional parameters to override
+
+        Returns:
+            BaseTransformer instance with optimized hyperparameters
+        """
+        if not hasattr(self, 'best_params_'):
+            raise ValueError("No tuning results found. Run tune_hyperparameters first.")
+
+        best_params = self.best_params_.copy()
+        best_params.update(override_params)
+
+        # Remove epochs from params as it's not a BaseTransformer parameter
+        epochs = best_params.pop('epochs', 100)
+
+        return BaseTransformer(**best_params)
+
+    def quick_tune(self, X_train, y_train, cv=3, epochs=30):
+        """
+        Quick hyperparameter tuning with a smaller parameter grid [[2]]
+        Suitable for initial exploration or when computational resources are limited
+        """
+        # Smaller parameter grid for faster execution [[2]]
+        quick_param_grid = {
+            'd_model': [128, 256],
+            'num_heads': [4, 8],
+            'num_layers': [2, 4],
+            'dropout': [0.1, 0.2],
+            'learning_rate': [1e-4, 5e-4],
+            'batch_size': [32, 64]
+        }
+
+        return self.tune_hyperparameters(
+            X_train, y_train,
+            param_grid=quick_param_grid,
+            cv=cv,
+            epochs=epochs,
+            verbose=True
+        )
+
+
+class BaseTransformerWrapper(BaseEstimator, RegressorMixin):
+    """Scikit-learn compatible wrapper for BaseTransformer"""
+
+    def __init__(self, d_model=512, num_heads=8, num_layers=6, d_ff=2048,
+                 dropout=0.1, learning_rate=1e-4, batch_size=32, epochs=50,
+                 output_dim=1, max_seq_length=5000, mask_value=0.0, verbose=False):
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.num_layers = num_layers
+        self.d_ff = d_ff
+        self.dropout = dropout
+        self.learning_rate = learning_rate
+        self.batch_size = batch_size
+        self.epochs = epochs
+        self.output_dim = output_dim
+        self.max_seq_length = max_seq_length
+        self.mask_value = mask_value
+        self.verbose = verbose
+        self.model_ = None
+
+    def fit(self, X, y):
+        """Fit the BaseTransformer model"""
+        # Initialize the model with current hyperparameters
+        self.model_ = BaseTransformer(
+            d_model=self.d_model,
+            num_heads=self.num_heads,
+            num_layers=self.num_layers,
+            d_ff=self.d_ff,
+            dropout=self.dropout,
+            learning_rate=self.learning_rate,
+            batch_size=self.batch_size,
+            output_dim=self.output_dim,
+            max_seq_length=self.max_seq_length,
+            mask_value=self.mask_value
+        )
+
+        # Train the model
+        self.model_.fit(X, y, epochs=self.epochs, verbose=self.verbose)
+        return self
+
+    def predict(self, X):
+        """Make predictions using the trained model"""
+        if self.model_ is None:
+            raise ValueError("Model must be fitted before making predictions")
+        return self.model_.predict(X).flatten()
+
+    def score(self, X, y):
+        """Return R² score for regression tasks"""
+        if self.model_ is None:
+            raise ValueError("Model must be fitted before scoring")
+        return self.model_.score(X, y)
