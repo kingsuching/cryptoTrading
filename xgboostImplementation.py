@@ -144,17 +144,14 @@ class XGBoost(BaseEstimator, RegressorMixin):
 
             # Apply learning rate and update predictions
             y_pred += self.learning_rate * tree_pred
-
-            # Store estimator
             self.estimators_.append(estimator)
 
             # Calculate and store training score
             mse = mean_squared_error(y_array, y_pred)
             self.train_scores_.append(mse)
 
-            # Early stopping could be implemented here
+            # Early stopping
             if i > 10 and abs(self.train_scores_[-1] - self.train_scores_[-2]) < 1e-6:
-                print(f"Early stopping at iteration {i}")
                 break
 
         # Compute feature importances (average from all trees)
@@ -437,215 +434,9 @@ class XGBoost(BaseEstimator, RegressorMixin):
         # Fit with best parameters
         return self.fit(X, y)
 
-    def save_model(self, filepath, method='joblib'):
-        """
-        Save the entire model to a file
-
-        Parameters:
-        -----------
-        filepath : str
-            Path where to save the model
-        method : str, default='joblib'
-            Method to use for saving ('joblib', 'pickle')
-        """
-        # Ensure directory exists
-        os.makedirs(os.path.dirname(filepath) if os.path.dirname(filepath) else '.', exist_ok=True)
-
-        if method == 'joblib':
-            joblib.dump(self, filepath)
-        elif method == 'pickle':
-            with open(filepath, 'wb') as f:
-                pickle.dump(self, f)
-        else:
-            raise ValueError("Method must be 'joblib' or 'pickle'")
-
-        print(f"Model saved to {filepath} using {method}")
-
-    @classmethod
-    def load_model(cls, filepath, method='joblib'):
-        """
-        Load a model from a file
-
-        Parameters:
-        -----------
-        filepath : str
-            Path to the saved model file
-        method : str, default='joblib'
-            Method used for loading ('joblib', 'pickle')
-
-        Returns:
-        --------
-        model : XGBoost
-            Loaded XGBoost model
-        """
-        if not os.path.exists(filepath):
-            raise FileNotFoundError(f"Model file not found: {filepath}")
-
-        if method == 'joblib':
-            model = joblib.load(filepath)
-        elif method == 'pickle':
-            with open(filepath, 'rb') as f:
-                model = pickle.load(f)
-        else:
-            raise ValueError("Method must be 'joblib' or 'pickle'")
-
-        print(f"Model loaded from {filepath} using {method}")
-        return model
-
-    def state_dict(self):
-        """
-        Get the state dictionary of the model (similar to PyTorch's state_dict)
-
-        Returns:
-        --------
-        state : dict
-            Dictionary containing all model parameters and trained components
-        """
-        state = {
-            # Hyperparameters
-            'hyperparameters': {
-                'n_estimators': self.n_estimators,
-                'learning_rate': self.learning_rate,
-                'max_depth': self.max_depth,
-                'subsample': self.subsample,
-                'reg_lambda': self.reg_lambda,
-                'reg_alpha': self.reg_alpha,
-                'random_state': self.random_state
-            },
-
-            # Trained components
-            'estimators': self.estimators_,
-            'train_scores': self.train_scores_,
-            'feature_importances': self.feature_importances_,
-
-            # Base estimator info
-            'base_estimator_class': self.base_estimator.__class__.__name__ if self.base_estimator else None,
-            'base_estimator_params': self.base_estimator.get_params() if self.base_estimator else None,
-
-            # Tuning results (if available)
-            'best_params': self.best_params_,
-            'best_score': self.best_score_,
-            'tuning_results': self.tuning_results_,
-
-            # Metadata
-            'model_version': '1.0',
-            'created_timestamp': datetime.now().isoformat(),
-            'is_fitted': len(self.estimators_) > 0
-        }
-
-        return state
-
-    def load_state_dict(self, state_dict):
-        """
-        Load model state from a state dictionary
-
-        Parameters:
-        -----------
-        state_dict : dict
-            Dictionary containing model state (from state_dict() method)
-        """
-        # Load hyperparameters
-        hyperparams = state_dict.get('hyperparameters', {})
-        for key, value in hyperparams.items():
-            setattr(self, key, value)
-
-        # Load trained components
-        self.estimators_ = state_dict.get('estimators', [])
-        self.train_scores_ = state_dict.get('train_scores', [])
-        self.feature_importances_ = state_dict.get('feature_importances')
-
-        # Load tuning results
-        self.best_params_ = state_dict.get('best_params')
-        self.best_score_ = state_dict.get('best_score')
-        self.tuning_results_ = state_dict.get('tuning_results', [])
-
-        # Reconstruct base estimator
-        base_estimator_class = state_dict.get('base_estimator_class')
-        base_estimator_params = state_dict.get('base_estimator_params')
-
-        if base_estimator_class == 'DecisionTreeRegressor':
-            self.base_estimator = DecisionTreeRegressor(**base_estimator_params)
-        elif base_estimator_class is None:
-            self.base_estimator = DecisionTreeRegressor(
-                max_depth=self.max_depth,
-                random_state=self.random_state
-            )
-
-        print(f"Model state loaded successfully. Fitted: {state_dict.get('is_fitted', False)}")
-
-    def save_state_dict(self, filepath):
-        """
-        Save the model state dictionary to a file
-
-        Parameters:
-        -----------
-        filepath : str
-            Path where to save the state dictionary
-        """
-        # Ensure directory exists
-        os.makedirs(os.path.dirname(filepath) if os.path.dirname(filepath) else '.', exist_ok=True)
-
-        state = self.state_dict()
-
-        # Use joblib for the state dict as it handles sklearn objects better
-        if filepath.endswith('.json'):
-            # For json, we need to handle non-serializable objects
-            json_state = self._prepare_state_for_json(state)
-            with open(filepath, 'w') as f:
-                json.dump(json_state, f, indent=2)
-        else:
-            # Use joblib for full state preservation
-            joblib.dump(state, filepath)
-
-        print(f"State dictionary saved to {filepath}")
-
-    def _prepare_state_for_json(self, state):
-        """
-        Prepare state dictionary for JSON serialization by handling non-serializable objects
-        """
-        json_state = state.copy()
-
-        # Remove non-serializable objects for JSON
-        json_state['estimators'] = f"<{len(state['estimators'])} trained estimators>"
-        json_state['feature_importances'] = state['feature_importances'].tolist() if state[
-                                                                                         'feature_importances'] is not None else None
-        json_state['train_scores'] = [float(score) for score in state['train_scores']]
-
-        return json_state
-
-    @classmethod
-    def load_state_dict_from_file(cls, filepath):
-        """
-        Create a new model instance and load state from a file
-
-        Parameters:
-        -----------
-        filepath : str
-            Path to the saved state dictionary file
-
-        Returns:
-        --------
-        model : XGBoost
-            New XGBoost model with loaded state
-        """
-        if not os.path.exists(filepath):
-            raise FileNotFoundError(f"State dictionary file not found: {filepath}")
-
-        # Create new instance
-        model = cls()
-
-        # Load state
-        if filepath.endswith('.json'):
-            with open(filepath, 'r') as f:
-                state_dict = json.load(f)
-            print(
-                "Warning: JSON format doesn't preserve trained estimators. Use joblib format for complete model saving.")
-        else:
-            state_dict = joblib.load(filepath)
-
-        model.load_state_dict(state_dict)
-
-        return model
+    def save(self, file):
+        with open(file, 'wb') as f:
+            pickle.dump(self, f)
 
     def model_info(self):
         """

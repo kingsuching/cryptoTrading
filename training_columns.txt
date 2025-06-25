@@ -7,3 +7,4 @@ BB_Middle
 BB_Upper
 value
 avg_sentiment
+value

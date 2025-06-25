@@ -447,3 +447,18 @@ def normalize(X_train, X_test, y_train, y_test):
 
     # return the training sets and the normalization scalers for predicting
     return X_train_norm, X_test_norm, y_train_norm, y_test_norm, sequence_scaler, target_scaler
+
+def normalize_regular(X_train, X_test, y_train, y_test):
+    sequence_scaler = StandardScaler()
+    target_scaler = StandardScaler()
+
+    y_train_scaled = target_scaler.fit_transform(y_train.values.reshape(-1, 1)).flatten()
+    y_test_scaled = target_scaler.transform(y_test.values.reshape(-1, 1)).flatten()
+    X_train_scaled = sequence_scaler.fit_transform(X_train)
+    X_test_scaled = sequence_scaler.transform(X_test)
+    X_train_scaled = pd.DataFrame(X_train_scaled, columns=X_train.columns)
+    X_test_scaled = pd.DataFrame(X_test_scaled, columns=X_test.columns)
+    y_train_scaled = pd.Series(y_train_scaled)
+    y_test_scaled = pd.Series(y_test_scaled)
+
+    return X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled, sequence_scaler, target_scaler
