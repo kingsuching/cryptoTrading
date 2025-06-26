@@ -8,6 +8,7 @@ import requests
 import torch
 from audioread.ffdec import ReadTimeoutError
 from bs4 import BeautifulSoup
+from matplotlib import pyplot as plt
 from serpapi import GoogleSearch
 from sklearn.model_selection import cross_val_score
 from sklearn.preprocessing import StandardScaler
@@ -16,6 +17,7 @@ from torch.nn.functional import softmax
 from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import CONSTANTS
+from API_KEYS import *
 from CONSTANTS import *
 
 
@@ -115,7 +117,7 @@ def newspapers_from_queries(coin, queries_path):
         stuff = get_newspapers(q, links)
         newspapers = pd.concat([newspapers, stuff], ignore_index=True)
 
-    newspapers.to_csv(PATH, index=False)
+    newspapers.to_csv(PATH, index=True)
     return newspapers
 
 def newspaper_sentiment_pipeline(coin, newspaper_path=None, queries_path='queries.txt', NEGATIVE=-1, NEUTRAL=0, POSITIVE=1):
@@ -138,14 +140,13 @@ def newspaper_sentiment_pipeline(coin, newspaper_path=None, queries_path='querie
     
     # Step 4: Merge the newspaper data with the full/market data
     df = pd.read_csv(fullDataPath(coin))
-    # drop the 'Unnamed: 0' columns
     unnamed = df.columns.str.contains(r'^Unnamed: \d+(\.\d+)?$')
     df = df.loc[:, ~unnamed]
-    df['time'] = pd.to_datetime(df['time'])  # Convert 'time' to datetime
-    coin_newspapers['date'] = pd.to_datetime(coin_newspapers['date'])  # Convert 'date' to datetime
+    df['time'] = pd.to_datetime(df['time'])
+    coin_newspapers['date'] = pd.to_datetime(coin_newspapers['date'])
     merged_df = pd.merge(df, coin_newspapers, left_on='time', right_on='date', how='left')
     myFillNa(merged_df)
-    merged_df.to_csv(fullDataPath(coin), index=False)
+    merged_df.to_csv(fullDataPath(coin), index=True)
 
     return merged_df
 
@@ -271,11 +272,8 @@ def prices(product_id, period=30, granularity=86400, start=None, end=None):
 
         try:
             response = requests.get(url, params=params)
-        except ConnectionError:
-            print("No internet connection")
-            return None, coin
-        except ReadTimeoutError:
-            print('Your wifi likely doesn\'t allow to access Coinbase API')
+        except Exception as e:
+            print('Fetch failed with exception: ', e)
             return None, coin
 
         if response.status_code == 200:
@@ -333,31 +331,37 @@ def normalize_sequences(df_column, scaler):
         normalized_sequences.append(normalized_seq.tolist())
     return normalized_sequences
 
-def dataSetup(data):
-    # Convert time to datetime if it's not already
+
+def dataSetup(data, trainingColPath='training_columns.txt', response='close'):
+    """
+    Sets up the data for training
+    :param data: full dataset
+    :param trainingColPath: path to specified columns to be used in training
+    :param response: response variable
+    :return: dataset where each OU is a day combined with sentiment for all news found that day about the coin
+    """
+
     data['time'] = pd.to_datetime(data['time'], errors='coerce')
     data = data.dropna(subset=['time'])
     data['date'] = data['time'].dt.date
 
     # Group by date and aggregate values (one row per day)
-    # Hard coded change later
+    with open(trainingColPath, 'r') as file:
+        trainingCols = [i.strip() for i in file.readlines()]
+
+    d = {}
+    trainingCols.append(response)
+    for col in trainingCols:
+        if col == 'avg_sentiment':
+            d[col] = (col, 'mean')
+        elif col == 'tweet_count':
+            d[col] = (col, 'count')
+        else:
+            d[col] = (col, 'last')
     daily_data = (
         data
         .groupby('date')
-        .agg(
-            close=('close', 'last'),
-            avg_sentiment=('score', 'mean'),
-            tweet_count=('score', 'count'),
-            volume=('volume', 'last'),
-            BB_Lower=('BB_Lower', 'last'),
-            BB_Middle=('BB_Middle', 'last'),
-            BB_Upper=('BB_Upper', 'last'),
-            SMA_50=('SMA_50', 'last'),
-            Volume_MA_20=('Volume_MA_20', 'last'),
-            value=('value', 'last'),
-            value_classification=('value_classification', 'last'),
-            OBV=('OBV', 'last')
-        )
+        .agg(**d)
         .reset_index()
     )
 
@@ -462,3 +466,23 @@ def normalize_regular(X_train, X_test, y_train, y_test):
     y_test_scaled = pd.Series(y_test_scaled)
 
     return X_train_scaled, X_test_scaled, y_train_scaled, y_test_scaled, sequence_scaler, target_scaler
+
+def predictNextNDaysTransformer(model, daily_data, sequence_scaler, RESPONSE='close', n=7, total_length=365):
+    """
+    predict the next n (default 7) close prices using the provided transformer
+    :param model:
+    :param daily_data:
+    :param sequence_scaler:
+    :param RESPONSE:
+    :param n:
+    :param total_length:
+    :return:
+    """
+    price = daily_data[RESPONSE].iloc[-1]
+    starter = daily_data[RESPONSE].iloc[-30:]
+    predictions = predict_sequence(model, price, starter, sequence_scaler, sequence_length=n, total_length=total_length)
+    new_days = pd.date_range(start=daily_data.index[-1] + pd.Timedelta(days=1), periods=len(predictions), freq='D')
+    predictions_df = pd.DataFrame(predictions, index=new_days, columns=[RESPONSE])
+    predictions_df.plot.line()
+    plt.show()
+    return predictions_df

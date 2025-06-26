@@ -219,9 +219,8 @@ class XGBoost(BaseEstimator, RegressorMixin):
         test_scores = []
         train_scores = [] if return_train_score else None
         splits = kfold.split(X)
-        for fold, (train_idx, test_idx) in enumerate(splits):
-            print(f"Fold {fold+1}/{cv}")
 
+        for fold, (train_idx, test_idx) in tqdm(enumerate(splits), total=cv, desc="CV Folds"):
             X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
             y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
 
