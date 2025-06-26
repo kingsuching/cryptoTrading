@@ -127,7 +127,7 @@ class TransformerEncoder(nn.Module):
 
 class BaseTransformer(nn.Module):
     def __init__(self, d_model=512, num_heads=8, num_layers=6,
-                 d_ff=2048, max_seq_length=5000, dropout=0.1, output_dim=1,
+                 d_ff=2048, max_seq_length=5000, dropout=0.1, output_dim=TEST_DAYS,
                  learning_rate=1e-4, batch_size=32, mask_value=0.0):
         super(BaseTransformer, self).__init__()
 
@@ -180,63 +180,56 @@ class BaseTransformer(nn.Module):
         x = self.positional_encoding(x)
         x = self.dropout(x)
         x = self.transformer_encoder(x, mask)
-
-        # Global average pooling
         x = x.mean(dim=1)
-        output = self.output_projection(x)
 
+        # Output projection now returns (batch_size, 7) for 7-day prediction
+        output = self.output_projection(x)  # (batch_size, 7)
         return output
 
     def _prepare_data(self, X, y):
         """Convert DataFrame with lists and Series to proper tensor format"""
         # Handle pandas DataFrame with lists in a single column
         if isinstance(X, pd.DataFrame):
-            # Get the column name (assuming single column with lists)
             column_name = X.columns[0]
-
-            # Extract the lists from the DataFrame column
             list_data = X[column_name].tolist()
-
-            # Convert lists to numpy arrays and stack them
-            # Each list becomes a sequence (row in the final array)
             sequences = []
             for seq in list_data:
                 if isinstance(seq, list):
                     sequences.append(np.array(seq, dtype=np.float32))
                 else:
-                    # Handle case where it's already an array
                     sequences.append(np.array(seq, dtype=np.float32))
-
-            # Stack all sequences into a 2D array: (num_samples, seq_length)
             X_array = np.stack(sequences)
-
             if len(X_array.shape) == 2:
-                # X_array is (batch_size, seq_length) - add feature dimension
                 X_array = X_array.reshape(X_array.shape[0], X_array.shape[1], 1)
-
         elif isinstance(X, pd.Series):
-            # Handle Series with lists
             list_data = X.tolist()
             sequences = [np.array(seq, dtype=np.float32) for seq in list_data]
             X_array = np.stack(sequences)
-
             if len(X_array.shape) == 2:
                 X_array = X_array.reshape(X_array.shape[0], X_array.shape[1], 1)
         else:
-            # Handle other formats (numpy arrays, etc.)
             X_array = np.array(X)
             if len(X_array.shape) == 2:
                 X_array = X_array.reshape(X_array.shape[0], X_array.shape[1], 1)
 
-        # Handle pandas Series for y
+        # Handle y data - NEW CODE FOR SERIES OF LISTS
         if isinstance(y, pd.Series):
-            y_array = y.values
+            # Check if the Series contains lists
+            if isinstance(y.iloc[0], list):
+                # Convert Series of lists to 2D numpy array
+                y_list_data = y.tolist()
+                y_array = np.array(y_list_data, dtype=np.float32)  # Shape: (n_samples, 7)
+            else:
+                # Regular Series with single values
+                y_array = y.values
+                if len(y_array.shape) == 1:
+                    y_array = y_array.reshape(-1, 1)
+        elif isinstance(y, pd.DataFrame):
+            y_array = y.values.astype(np.float32)
         else:
-            y_array = np.array(y)
-
-        # Ensure y is 2D: (batch_size, output_dim)
-        if len(y_array.shape) == 1:
-            y_array = y_array.reshape(-1, 1)
+            y_array = np.array(y, dtype=np.float32)
+            if len(y_array.shape) == 1:
+                y_array = y_array.reshape(-1, 1)
 
         # Convert to tensors
         X_tensor = torch.FloatTensor(X_array).to(self.device)

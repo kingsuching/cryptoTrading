@@ -1,4 +1,8 @@
-SMA_7
 BB_Lower
 BB_Upper
 value
+avg_sentiment
+volume
+OBV
+SMA_7
+Volume_MA_7

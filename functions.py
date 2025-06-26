@@ -294,19 +294,35 @@ def prices(product_id, period=30, granularity=86400, start=None, end=None):
         return data, coin
     return None, coin
 
+
 def sequence(column, index):
-    if index == len(column)-1:
-        return column.values[:index].tolist(), column.values[-1]
-    if index < len(column):
-        return column.values[:index].tolist(), column.values[index+1]
-    raise ValueError(f'Index = {index} ≥ Length = {len(column)}')
+    if index >= len(column):
+        raise ValueError(f'Index = {index} ≥ Length = {len(column)}')
+
+    sequence_data = column.values[:index].tolist()
+    remaining_values = len(column)-index-1
+    next_values_count = min(TEST_DAYS, remaining_values)
+    if next_values_count == 0:
+        # Use the last available value (at index) repeated 7 times
+        last_value = column.values[index] if index < len(column) else column[index]
+        return sequence_data, [last_value] * TEST_DAYS
+    next_values = column.values[index:(index + next_values_count)].tolist()
+
+    # Repeat the last available value to fill up to 7
+    if len(next_values) < TEST_DAYS:
+        last_value = next_values[-1]
+        while len(next_values) < TEST_DAYS:
+            next_values.append(last_value)
+
+    return sequence_data, next_values
+
 
 def padding(sequence, target_length=5):
     """Pad or truncate sequence to target_length"""
     if len(sequence) > target_length:
         return sequence[:target_length]  # Truncate
     elif len(sequence) < target_length:
-        return sequence + [CONSTANTS.FILL] * (target_length - len(sequence))  # Pad
+        return sequence + [CONSTANTS.FILL] * (target_length - len(sequence)) # Do padding
     return sequence  # Already correct length
 
 def compute_rsi(series, window=14):
@@ -351,13 +367,16 @@ def dataSetup(data, trainingColPath='training_columns.txt', response='close'):
 
     d = {}
     trainingCols.append(response)
+    # set up the aggregation dictionary kwargs
     for col in trainingCols:
         if col == 'avg_sentiment':
-            d[col] = (col, 'mean')
+            d[col] = ('score', 'mean')
         elif col == 'tweet_count':
-            d[col] = (col, 'count')
+            d[col] = ('score', 'count')
         else:
             d[col] = (col, 'last')
+
+    # Perform the aggregation
     daily_data = (
         data
         .groupby('date')
@@ -365,12 +384,12 @@ def dataSetup(data, trainingColPath='training_columns.txt', response='close'):
         .reset_index()
     )
 
-    # Convert date back to datetime format if needed and sort by time
+    # Clean up dataset
     daily_data['time'] = pd.to_datetime(daily_data['date'])
     daily_data = daily_data.drop('date', axis=1)
     daily_data = daily_data.sort_values('time')
     daily_data.set_index('time', inplace=True)
-    daily_data['gradient'] = daily_data['close'].diff().fillna(0.0)
+    daily_data['gradient'] = daily_data['close'].diff().fillna(0.0) # proper gradient
     return daily_data
 
 
@@ -419,25 +438,41 @@ def transformerDataSetup(daily_data, col='close'):
     return daily_data
 
 
-def transformerXTrainYTrain(daily_data, testSize, makeNormal=False):
+def transformerXTrainYTrain(daily_data, testSize):
     train_data = daily_data.iloc[:testSize]
+    train_data_idx = train_data.index
     test_data = daily_data.iloc[testSize:]
+    test_data_idx = test_data.index
     X_train = train_data[['sequence']]
     y_train = train_data['next']
     X_test = test_data[['sequence']]
     y_test = test_data['next']
-    if makeNormal:
-        return normalize(X_train, X_test, y_train, y_test)
+    X_train.index = train_data_idx
+    X_test.index = test_data_idx
+    y_train.index = train_data_idx
+    y_test.index = test_data_idx
     return X_train, X_test, y_train, y_test, None, None
 
 
 def normalize(X_train, X_test, y_train, y_test):
     # Create scalers for both sequences and targets
+    xTrainIdx = X_train.index
+    xTestIdx = X_test.index
+    yTrainIdx = y_train.index
+    yTestIdx = y_test.index
+
     sequence_scaler = StandardScaler()
     target_scaler = StandardScaler()
 
-    y_train_scaled = target_scaler.fit_transform(y_train.values.reshape(-1, 1)).flatten()
-    y_test_scaled = target_scaler.transform(y_test.values.reshape(-1, 1)).flatten()
+    # Fit the scalers on the training data
+    y_train_arrays = np.array(y_train.tolist())  # Shape: (n_samples, 7)
+    y_test_arrays = np.array(y_test.tolist())  # Shape: (n_samples, 7)
+    y_train_flat = y_train_arrays.flatten().reshape(-1, 1)
+    target_scaler.fit(y_train_flat)
+
+    # Transform the target data
+    y_train_scaled = target_scaler.transform(y_train_arrays.reshape(-1, 1)).reshape(y_train_arrays.shape)
+    y_test_scaled = target_scaler.transform(y_test_arrays.reshape(-1, 1)).reshape(y_test_arrays.shape)
 
     # Apply normalization to sequence data
     X_train_norm = pd.DataFrame({
@@ -446,10 +481,13 @@ def normalize(X_train, X_test, y_train, y_test):
     X_test_norm = pd.DataFrame({
         'sequences': normalize_sequences(X_test.iloc[:, 0], sequence_scaler)
     })
-    y_train_norm = pd.Series(y_train_scaled)
-    y_test_norm = pd.Series(y_test_scaled)
 
-    # return the training sets and the normalization scalers for predicting
+    y_train_norm = pd.Series([row.tolist() for row in y_train_scaled])
+    y_test_norm = pd.Series([row.tolist() for row in y_test_scaled])
+    X_train_norm.index = xTrainIdx
+    X_test_norm.index = xTestIdx
+    y_train_norm.index = yTrainIdx
+    y_test_norm.index = yTestIdx
     return X_train_norm, X_test_norm, y_train_norm, y_test_norm, sequence_scaler, target_scaler
 
 def normalize_regular(X_train, X_test, y_train, y_test):
@@ -486,3 +524,8 @@ def predictNextNDaysTransformer(model, daily_data, sequence_scaler, RESPONSE='cl
     predictions_df.plot.line()
     plt.show()
     return predictions_df
+
+def trainingCols(path=TRAINING_COLUMNS):
+    with open(path, 'r') as file:
+        trainingCols = [i.strip() for i in file.readlines()]
+    return trainingCols
