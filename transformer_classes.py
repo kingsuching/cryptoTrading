@@ -138,6 +138,7 @@ class BaseTransformer(nn.Module):
         self.transformer_encoder = TransformerEncoder(
             num_layers, d_model, num_heads, d_ff, dropout
         )
+        self.output_dim = output_dim
         self.output_projection = nn.Linear(d_model, output_dim)
         self.dropout = nn.Dropout(dropout)
 
@@ -190,44 +191,58 @@ class BaseTransformer(nn.Module):
         """Convert DataFrame with lists and Series to proper tensor format"""
         # Handle pandas DataFrame with lists in a single column
         if isinstance(X, pd.DataFrame):
+            # Get the column name (assuming single column with lists)
             column_name = X.columns[0]
+
+            # Extract the lists from the DataFrame column
             list_data = X[column_name].tolist()
+
+            # Convert lists to numpy arrays and stack them
+            # Each list becomes a sequence (row in the final array)
             sequences = []
             for seq in list_data:
                 if isinstance(seq, list):
                     sequences.append(np.array(seq, dtype=np.float32))
                 else:
+                    # Handle case where it's already an array
                     sequences.append(np.array(seq, dtype=np.float32))
+
+            # Stack all sequences into a 2D array: (num_samples, seq_length)
             X_array = np.stack(sequences)
+
             if len(X_array.shape) == 2:
+                # X_array is (batch_size, seq_length) - add feature dimension
                 X_array = X_array.reshape(X_array.shape[0], X_array.shape[1], 1)
+
         elif isinstance(X, pd.Series):
+            # Handle Series with lists
             list_data = X.tolist()
             sequences = [np.array(seq, dtype=np.float32) for seq in list_data]
             X_array = np.stack(sequences)
             if len(X_array.shape) == 2:
                 X_array = X_array.reshape(X_array.shape[0], X_array.shape[1], 1)
         else:
+            # Handle other formats (numpy arrays, etc.)
             X_array = np.array(X)
             if len(X_array.shape) == 2:
                 X_array = X_array.reshape(X_array.shape[0], X_array.shape[1], 1)
 
-        # Handle y data - NEW CODE FOR SERIES OF LISTS
+        # Handle y data - THIS IS THE NEW PART FOR SERIES OF LISTS
         if isinstance(y, pd.Series):
-            # Check if the Series contains lists
-            if isinstance(y.iloc[0], list):
+            # Check if the Series contains lists (for multi-output)
+            if len(y) > 0 and isinstance(y.iloc[0], list):
                 # Convert Series of lists to 2D numpy array
                 y_list_data = y.tolist()
                 y_array = np.array(y_list_data, dtype=np.float32)  # Shape: (n_samples, 7)
             else:
                 # Regular Series with single values
                 y_array = y.values
+                # Ensure y is 2D: (batch_size, output_dim)
                 if len(y_array.shape) == 1:
                     y_array = y_array.reshape(-1, 1)
-        elif isinstance(y, pd.DataFrame):
-            y_array = y.values.astype(np.float32)
         else:
-            y_array = np.array(y, dtype=np.float32)
+            y_array = np.array(y)
+            # Ensure y is 2D: (batch_size, output_dim)
             if len(y_array.shape) == 1:
                 y_array = y_array.reshape(-1, 1)
 
