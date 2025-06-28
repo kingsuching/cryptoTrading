@@ -249,7 +249,6 @@ class BaseTransformer(nn.Module):
         # Convert to tensors
         X_tensor = torch.FloatTensor(X_array).to(self.device)
         y_tensor = torch.FloatTensor(y_array).to(self.device)
-
         return X_tensor, y_tensor
 
     def fit(self, X_train, y_train, epochs=100, validation_data=None, verbose=True):

@@ -529,3 +529,15 @@ def trainingCols(path=TRAINING_COLUMNS):
     with open(path, 'r') as file:
         trainingCols = [i.strip() for i in file.readlines()]
     return trainingCols
+
+def myLoss(y_true, y_pred):
+    """
+    Custom loss function for training
+    :param y_true: true values
+    :param y_pred: predicted values
+    :return: loss value
+    """
+    return torch.mean((y_true-y_pred) ** 2) - torch.std(y_pred)
+
+if __name__ == "__main__":
+    print(trainingCols())
