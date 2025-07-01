@@ -539,5 +539,8 @@ def myLoss(y_true, y_pred):
     """
     return torch.mean((y_true-y_pred) ** 2) - torch.std(y_pred)
 
-if __name__ == "__main__":
-    print(trainingCols())
+def normalize_col(df, column_name):
+    """Normalize a specified column in a DataFrame using StandardScaler."""
+    scaler = StandardScaler()
+    df[column_name] = scaler.fit_transform(df[[column_name]])
+    return df
