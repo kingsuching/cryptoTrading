@@ -1,4 +1,5 @@
 COIN = 'BTC'
+RESPONSE = 'close'
 EMPTY_STRING = '-'
 LIMIT = 365
 TRAINING_COLUMNS = 'training_columns.txt'

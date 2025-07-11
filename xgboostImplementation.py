@@ -10,7 +10,8 @@ from sklearn.model_selection import KFold
 from sklearn.base import BaseEstimator, RegressorMixin, clone
 from sklearn.tree import DecisionTreeRegressor
 from tqdm import tqdm
-
+from sklearn.model_selection import ParameterGrid
+import time
 from CONSTANTS import TEST_DAYS
 
 
@@ -21,7 +22,7 @@ class XGBoost(BaseEstimator, RegressorMixin):
 
     def __init__(self, base_estimator=None, n_estimators=100, learning_rate=0.1,
                  max_depth=3, subsample=1.0, reg_lambda=1.0, reg_alpha=0.0,
-                 random_state=None, output_size=TEST_DAYS):
+                 random_state=42, output_size=TEST_DAYS):
         """
         Initialize XGBoost implementation
 
@@ -500,8 +501,7 @@ class XGBoost(BaseEstimator, RegressorMixin):
         best_params : dict
             Best parameters found
         """
-        from sklearn.model_selection import ParameterGrid
-        import time
+
 
         # Default parameter grid if none provided
         if param_grid is None:
@@ -510,7 +510,8 @@ class XGBoost(BaseEstimator, RegressorMixin):
                 'learning_rate': [0.01, 0.1, 0.2],
                 'max_depth': [3, 5, 7],
                 'subsample': [0.8, 1.0],
-                'reg_lambda': [0.1, 1.0, 2.0]
+                'reg_lambda': [0.1, 1.0, 2.0],
+                'base_estimator': [self.base_estimator]
             }
 
         best_score = float('inf')  # We want to minimize RMSE/MSE

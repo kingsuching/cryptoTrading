@@ -6,3 +6,6 @@ volume
 OBV
 SMA_7
 Volume_MA_7
+low
+high
+open
