@@ -152,7 +152,7 @@ class XGBoost(BaseEstimator, RegressorMixin):
         X_processed = []
         column_names = []
 
-        for col in X.columns:
+        for col in tqdm(X.columns):
             col_data = X[col]
 
             # Check if this column contains lists
@@ -207,13 +207,13 @@ class XGBoost(BaseEstimator, RegressorMixin):
         self.estimators_ = []
 
         # Train separate models for each day (multi-output approach)
-        for day in range(self.output_size):
+        for day in tqdm(range(self.output_size)):
             day_estimators = []
             y_day = y_array[:, day]
             y_pred_day = np.zeros(len(y_day))
 
             # Boosting iterations for this day
-            for i in range(self.n_estimators):
+            for i in tqdm(range(self.n_estimators)):
                 # Compute gradients and hessians
                 gradients = self._compute_gradients(y_day, y_pred_day)
                 hessians = self._compute_hessians(y_day, y_pred_day)
@@ -237,15 +237,6 @@ class XGBoost(BaseEstimator, RegressorMixin):
                 # Apply learning rate and update predictions
                 y_pred_day += self.learning_rate * tree_pred
                 day_estimators.append(estimator)
-
-                # Early stopping check
-                if i > 10:
-                    current_mse = mean_squared_error(y_day, y_pred_day)
-                    if i == 11:
-                        prev_mse = current_mse
-                    elif abs(current_mse - prev_mse) < 1e-6:
-                        break
-                    prev_mse = current_mse
 
             self.estimators_.append(day_estimators)
             y_pred[:, day] = y_pred_day
