@@ -27,7 +27,7 @@ def preprocess(str):
 
 def article_metadata(query):
     params = {
-        "api_key": SERPAPI_KEY,
+        "api_key": "7f6415e4e109418bfe253032a0f501702f6b3b9eaf6dbf2433cba6df826d8fd1",
         "engine": "google_news",
         "hl": "en",
         "gl": "us",
