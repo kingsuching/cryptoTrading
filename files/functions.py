@@ -6,19 +6,17 @@ import numpy as np
 import pandas as pd
 import requests
 import torch
-from audioread.ffdec import ReadTimeoutError
 from bs4 import BeautifulSoup
 from matplotlib import pyplot as plt
 from serpapi import GoogleSearch
 from sklearn.model_selection import cross_val_score
 from sklearn.preprocessing import StandardScaler
-from sklearn.tree import DecisionTreeRegressor
 from torch.nn.functional import softmax
 from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
-import CONSTANTS
+from files import CONSTANTS
 from API_KEYS import *
-from CONSTANTS import *
+from files.CONSTANTS import *
 
 
 def preprocess(str):
@@ -151,7 +149,7 @@ def newspaper_sentiment_pipeline(coin, newspaper_path=None, queries_path='querie
     return merged_df
 
 def fullDataPath(coin):
-    return f'fulldata/{coin}_df.csv'
+    return f'../data/{coin}_df.csv'
 
 def get_fgi_data(df):
   url = f'https://pro-api.coinmarketcap.com/v3/fear-and-greed/historical?CMC_PRO_API_KEY={CMC_KEY}&limit={min(len(df), 500)}'
@@ -217,7 +215,7 @@ def myFillNa(df):
         else:
             df[col].fillna(np.nan, inplace=True)
 
-def cv_metrics(model, data, yCol='gradient', v=5, trainingColsPath='training_columns.txt'):
+def cv_metrics(model, data, yCol='gradient', v=5, trainingColsPath='files/training_columns.txt'):
     trainingCols = open(trainingColsPath, 'r').readlines()
     trainingCols = [i.strip() for i in trainingCols]
     assert yCol not in trainingCols, f'{yCol} should not be in trainingCols but was found in it'
@@ -364,9 +362,9 @@ def dataSetup(data, trainingColPath='training_columns.txt', response='close'):
     # Group by date and aggregate values (one row per day)
     with open(trainingColPath, 'r') as file:
         trainingCols = [i.strip() for i in file.readlines()]
-
     d = {}
     trainingCols.append(response)
+
     # set up the aggregation dictionary kwargs
     for col in trainingCols:
         if col == 'avg_sentiment':
