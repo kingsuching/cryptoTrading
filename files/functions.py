@@ -15,8 +15,9 @@ from torch.nn.functional import softmax
 from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from files import CONSTANTS
-from API_KEYS import *
+from files.API_KEYS import *
 from files.CONSTANTS import *
+
 
 
 def preprocess(str):
@@ -130,7 +131,7 @@ def newspaper_sentiment_pipeline(coin, newspaper_path=None, queries_path='querie
     nfq = sentimentAnalysis(nfq, NEGATIVE, NEUTRAL, POSITIVE)
     
     # Step 3: Load in the newspaper data (with sentiment) and preprocess it
-    coin_newspapers = pd.read_csv(f'newspapers/{coin}_newspapers.csv')
+    coin_newspapers = pd.read_csv(f'../newspapers/{coin}_newspapers.csv')
     coin_newspapers['date'] = pd.to_datetime(coin_newspapers['date'], format="%m/%d/%Y, %I:%M %p, %z UTC")
     coin_newspapers['date'] = coin_newspapers['date'].dt.date
     coin_newspapers['score'] = nfq['score']
@@ -542,3 +543,34 @@ def normalize_col(df, column_name):
     scaler = StandardScaler()
     df[column_name] = scaler.fit_transform(df[[column_name]])
     return df
+
+def preprocess_data(data, scaler=StandardScaler(), closeScaler=StandardScaler(), response='close'):
+    mergedIndex = data.index
+    mergedCols = data.columns
+
+    mergedWithoutClose = data.drop(columns=[response])
+    mwocCols = mergedWithoutClose.columns
+    mwocIndex = mergedWithoutClose.index
+    mergedWithoutClose = scaler.fit_transform(mergedWithoutClose)
+    mergedWithoutClose = pd.DataFrame(mergedWithoutClose, index=mergedIndex, columns=mwocCols)
+
+    data[response] = closeScaler.fit_transform(data[response].values.reshape(-1, 1))
+    data = pd.concat([mergedWithoutClose, data[response]], axis=1)
+
+    # Simple train-test split for Random Forest (no sequences needed)
+    # Remove the last TEST_DAYS for final testing
+    test_size_days = TEST_DAYS
+    train_data = data.iloc[:-test_size_days]
+    test_data = data.iloc[-test_size_days:]
+
+    # Prepare features and target - no need to duplicate training columns
+    X_train = train_data.drop(columns=[response])  # This already contains all training columns
+    y_train = train_data[response].values  # Single values, not sequences
+    X_test = test_data.drop(columns=[response])  # This already contains all training columns
+    y_test = test_data[response].values
+
+    # Use the features directly (no need to concat training_cols again)
+    X_train_norm = X_train
+    X_test_norm = X_test
+
+    return X_train_norm, X_test_norm, y_train, y_test, scaler, closeScaler
